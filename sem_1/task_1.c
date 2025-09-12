@@ -9,121 +9,141 @@
 #include <wctype.h>
 #include <wchar.h>
 
-//на вход приходи строка а потом печатаем строку с числом слов, потом вывод слова, сколько в нем цифр, английских букв и русских букв
-//пример: ввод:"лод7df ыщао98sfc 34kfлд" вывод: "слово: лод7df цифр: 1 английских букв: 2 русских букв: 3 .......и тд"
-
-static const int default_capacity = 4096; //page
-static const int scale_factor     = 2;
-
-typedef struct Buffer {
-    int      max_cap;
-    wchar_t* data;
-    int      word_cnt;
-} Buffer;
-
-static Buffer* BuffCtor(Buffer* buffer);
-static void    BuffDtor(Buffer* buffer);
-static void    realloc_if_needed(Buffer* buffer);
-
-int main() {
-    setlocale(LC_ALL, "");
-
-    Buffer buffer = {};
-    BuffCtor(&buffer);
-
-    wint_t ch       = 0;
-    size_t cur_char = 0;
-
-    wprintf(L"Enter your string: \n");
-    while ((ch = getwchar()) != WEOF
-         && ch != L'\n') {
-            if (cur_char + 1 >= buffer.max_cap) {
-                realloc_if_needed(&buffer);
-            }
-        buffer.data[cur_char] = (wchar_t)ch;
-        cur_char++;
-    }
-    buffer.data[cur_char] = L'\0';
-
-    if(cur_char == 0) {
-        wprintf(L"Empty string!\n");
-        BuffDtor(&buffer);
-        return 0;
-    }
-
-    int i = 0;
-
-    while (i < cur_char) {
-        while (iswspace(buffer.data[i])) {
-            i++;
-        }
-
-        if (i >= cur_char) break;
-
-        size_t start = i;
-        int digits   = 0;
-        int eng      = 0;
-        int rus      = 0;
-
-        while (i < cur_char
-            && !iswspace(buffer.data[i])) {
-            wchar_t c = buffer.data[i];
-
-        if (iswdigit(c)) {
-                        digits++;
-                    } else if ((c >= L'A'
-                             && c <= L'Z')
-                             || (c >= L'a'
-                                && c <= L'z')) {
-                        eng++;
-                    } else if ((c >= L'\u0410'
-                             && c <= L'\u044F')
-                             || c == L'\u0401'
-                             || c == L'\u0451') {
-                        rus++;
-                    }
-                    i++;
-                }
-
-                wprintf(L"word: '%.*ls'  number of digits: %d  eng letters: %d  rus letters: %d\n",
-                    (int)(i - start), buffer.data + start, digits, eng, rus);
-
-                buffer.word_cnt++;
-            }
-
-    wprintf(L"number of words: %d\n", buffer.word_cnt);
-
-    BuffDtor(&buffer);
-    return 0;
-}
+static void ensure_capacity(Buffer* buffer, int need );
+static int  is_english_letter(const wchar_t c);
+static int  is_russian_letter(const wchar_t c);
+static void print_word_stats(const wchar_t* start, int len);
 
 
-
-//-------------buffer------------
-static Buffer* BuffCtor(Buffer* buffer) {
+Buffer* BuffCtor(Buffer* buffer) {
     assert(buffer != NULL);
 
-    buffer->data = (wchar_t*)calloc(default_capacity + 1, sizeof(wchar_t));
+    buffer->capacity = default_capacity + 1;
+    buffer->word_cnt = 0;
+
+    buffer->data = (wchar_t*)calloc(buffer->capacity, sizeof(wchar_t));
     assert(buffer->data != NULL);
 
-    buffer->max_cap = default_capacity;
-    buffer->word_cnt = 0;
     return buffer;
 }
 
-static void BuffDtor(Buffer* buffer) {
+void BuffDtor(Buffer* buffer) {
     assert(buffer != NULL);
 
     free(buffer->data);
     buffer->data     = NULL;
-    buffer->max_cap  = 0;
+    buffer->capacity  = 0;
     buffer->word_cnt = 0;
 }
 
-static void realloc_if_needed(Buffer* buffer) {
+
+int read_line_to_buffer(Buffer* buffer) {
     assert(buffer != NULL);
 
-    buffer->max_cap = default_capacity * scale_factor;
-    buffer->data = (wchar_t*)realloc(buffer->data, (size_t)(buffer->max_cap + 1) * sizeof(wchar_t));
-    assert(buffer->data);
+    int    cur = 0;
+    wint_t wc  = 0;
+
+    while ((wc = getwchar()) != WEOF && wc != L'\n') {
+        ensure_capacity(buffer, cur + 1);
+        buffer->data[cur++] = (wchar_t)wc;
+    }
+    ensure_capacity(buffer, cur);
+
+    buffer->data[cur] = L'\0';
+
+    return cur;
+}
+
+void process_and_print_words(Buffer* buffer, int len) {
+    assert(buffer != NULL
+        && buffer->data != NULL);
+
+    int i = 0;
+
+    while (i < len) {
+        while (i < len && iswspace(buffer->data[i])) {
+                i++;
+            }
+
+        if (i >= len) break;
+
+        int start = i;
+        while (i < len && !iswspace(buffer->data[i])) {
+            i++;
+        }
+        int word_len = i - start;
+
+        print_word_stats(buffer->data + start, word_len);
+        buffer->word_cnt++;
+    }
+
+    wprintf(L"number of words: %d\n", buffer->word_cnt);
+}
+
+
+
+static int is_english_letter(const wchar_t c) {
+    return (c >= L'A' && c <= L'Z')
+        || (c >= L'a' && c <= L'z');
+}
+
+static int is_russian_letter(const wchar_t c) {
+    return (c >= 0x0410 && c <= 0x044F)
+         || c == 0x0401
+         || c == 0x0451;
+}
+
+
+static void print_word_stats(const wchar_t* start, int len) {
+    assert(start != NULL);
+
+    if (len == 0) return;
+
+    int digits = 0;
+    int eng    = 0;
+    int rus    = 0;
+
+    for (int k = 0; k < len; k++) {
+        wchar_t c = start[k];
+        if (iswdigit(c)) {
+            digits++;
+        } else if (is_english_letter(c)) {
+            eng++;
+        } else if (is_russian_letter(c)) {
+            rus++;
+        }
+    }
+
+    wprintf(L"word: '%.*ls'  digits: %d  eng letters: %d  rus letters: %d\n",
+            (int)len, start,   digits,           eng,                rus);
+}
+
+static void ensure_capacity(Buffer* buffer, int need) {
+    assert(buffer != NULL);
+    if (need + 1 <= buffer->capacity) {
+        return;
+    }
+
+    int new_cap = buffer->capacity ? buffer->capacity : default_capacity;
+
+    while (new_cap < need + 1) {
+        int prev = new_cap;
+        new_cap  = new_cap * scale_factor;
+        if (new_cap <= prev) {
+            new_cap = prev + 1;
+        }
+    }
+
+    wchar_t* tmp = (wchar_t*)realloc(buffer->data, (new_cap + 1) * sizeof(wchar_t));
+    if (!tmp) {
+        fwprintf(stderr, L"Reallocation error in ensure_capacity func!\n");
+        free(buffer->data);
+        abort();
+    }
+
+    if (new_cap > buffer->capacity) {
+        memset(tmp + buffer->capacity, 0, (new_cap + 1 - buffer->capacity) * sizeof(wchar_t));
+    }
+    buffer->data = tmp;
+    buffer->capacity = new_cap;
 }
